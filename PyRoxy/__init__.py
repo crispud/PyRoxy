@@ -10,7 +10,6 @@ from typing import AnyStr, Set, Collection, Any
 from socks import socksocket, SOCKS4, SOCKS5, HTTP
 from yarl import URL
 
-from PyRoxy import GeoIP, Tools
 from PyRoxy.Exceptions import ProxyInvalidHost, ProxyInvalidPort, ProxyParseError
 from PyRoxy.Tools import Patterns
 
@@ -42,25 +41,26 @@ class ProxyType(IntEnum):
 class Proxy(object):
     user: Any
     password: Any
-    country: Any
     port: int
     type: ProxyType
     host: AnyStr
 
-    def __init__(self,
-                 host: str,
-                 port: int = 0,
-                 proxy_type: ProxyType = ProxyType.HTTP,
-                 user=None,
-                 password=None):
-        if Patterns.URL.match(host): host = gethostbyname(host)
+    def __init__(
+            self,
+            host: str,
+            port: int = 0,
+            proxy_type: ProxyType = ProxyType.HTTP,
+            user=None,
+            password=None
+    ):
+        if proxy_type == ProxyType.HTTPS:
+            proxy_type = ProxyType.HTTP
+        host = gethostbyname(host)
+        port = int(port)
         assert self.validate(host, port)
         self.host = host
         self.type = proxy_type
         self.port = port
-        self.country = GeoIP.get(host)
-        if self.country:
-            self.country = self.country["registered_country"]["iso_code"]
         self.user = user or None
         self.password = password or None
 
@@ -70,19 +70,35 @@ class Proxy(object):
                                   if self.password and self.user else ""))
 
     def __repr__(self):
-        return "<%s %s Proxy %s:%d>" % (self.type.name, self.country.upper(),
-                                        self.host, self.port)
+        return "<%s Proxy %s:%d>" % (self.type.name, self.host, self.port)
+
+    def as_tuple(self):
+        return self.host, self.port, self.type, self.user, self.password
+
+    def __eq__(self, other):
+        return self.as_tuple() == other.as_tuple()
+
+    def __hash__(self):
+        return hash(self.as_tuple())
 
     @staticmethod
     def fromString(string: str):
         with suppress(Exception):
+            if '@' in string:
+                auth, ip_port = string.split('@', 1)
+                if '://' in auth:
+                    _, auth = auth.split('://', 1)
+                string = string.replace(auth + '@', '') + ':' + auth
+
             proxy: Any = Patterns.Proxy.search(string)
             return Proxy(
                 proxy.group(2),
                 int(proxy.group(3))
                 if proxy.group(3) and proxy.group(3).isdigit() else 80,
-                ProxyType.stringToProxyType(proxy.group(1)), proxy.group(4),
-                proxy.group(5))
+                ProxyType.stringToProxyType(proxy.group(1) or 'http'),
+                proxy.group(4),
+                proxy.group(5)
+            )
         return None
 
     def ip_port(self):
@@ -93,7 +109,7 @@ class Proxy(object):
         with suppress(ValueError):
             if not ip_address(host):
                 raise ProxyInvalidHost(host)
-            if not Tools.Patterns.Port.match(str(port)):
+            if not Patterns.Port.match(str(port)):
                 raise ProxyInvalidPort(port)
             return True
         raise ProxyInvalidHost(host)
@@ -114,10 +130,12 @@ class Proxy(object):
         return sock
 
     def asRequest(self):
-        return {
-            "http": self.__str__(),
-            "https": self.__str__().replace("http://", "https://")
-        }
+        if self.password and self.user:
+            proxy = "%s://%s:%s@%s:%d" % (self.type.name.lower(), self.user, self.password, self.host, self.port)
+        else:
+            proxy = "%s://%s:%d" % (self.type.name.lower(), self.host, self.port)
+
+        return {"http": proxy, "https": proxy}
 
     # noinspection PyUnreachableCode
     def check(self, url: Any = "https://httpbin.org/get", timeout=5):
@@ -188,13 +206,13 @@ class ProxyUtiles:
             *ProxyUtiles.parseAllIPPort(proxies, ptype),
             *ProxyUtiles.parseNoraml(proxies)
         }
-        if None in final: final.remove(None)
+        while None in final: final.remove(None)
         return final
 
     @staticmethod
     def parseNoraml(proxies: Collection[str]) -> Set[Proxy]:
         res = set(map(Proxy.fromString, proxies))
-        if None in res: res.remove(None)
+        while None in res: res.remove(None)
         return res
 
     @staticmethod
@@ -209,7 +227,7 @@ class ProxyUtiles:
         return resu
 
     @staticmethod
-    def readFromFile(path: Any) -> Set[Proxy]:
+    def readFromFile(path: Any, ptype: ProxyType = ProxyType.HTTP) -> Set[Proxy]:
         if isinstance(path, Path):
             with path.open("r+") as read:
                 lines = read.readlines()
@@ -217,7 +235,7 @@ class ProxyUtiles:
             with open(path, "r+") as read:
                 lines = read.readlines()
 
-        return ProxyUtiles.parseAll([prox.strip() for prox in lines])
+        return ProxyUtiles.parseAll([prox.strip() for prox in lines], ptype)
 
     @staticmethod
     def readIPPortFromFile(path: Any) -> Set[Proxy]:

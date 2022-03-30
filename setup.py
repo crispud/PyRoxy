@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(name='PyRoxy',
       version="1.0b5",
-      packages=['PyRoxy', 'PyRoxy.GeoIP', 'PyRoxy.Tools', 'PyRoxy.Exceptions'],
+      packages=['PyRoxy', 'PyRoxy.Tools', 'PyRoxy.Exceptions'],
       url='https://github.com/MHProDev/PyRoxy',
       license='MIT',
       author="MH_ProDev",
@@ -12,6 +12,4 @@ setup(name='PyRoxy',
       ],
       include_package_data=True,
       package_data={
-          'PyRoxy.GeoIP': ['Sqlite/*.txt', "Sqlite/GeoLite2-Country.mmdb"],
-          '': ["LICENSE.md"]
       })
