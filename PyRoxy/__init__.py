@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from enum import IntEnum, auto
+from functools import partial
 from ipaddress import ip_address
 from multiprocessing import cpu_count
 from pathlib import Path
@@ -82,7 +83,7 @@ class Proxy(object):
         return hash(self.as_tuple())
 
     @staticmethod
-    def fromString(string: str):
+    def fromString(string: str, ptype=ProxyType.HTTP):
         with suppress(Exception):
             if '@' in string:
                 auth, ip_port = string.split('@', 1)
@@ -91,11 +92,12 @@ class Proxy(object):
                 string = string.replace(auth + '@', '') + ':' + auth
 
             proxy: Any = Patterns.Proxy.search(string)
+            ptype_name = proxy.group(1)
             return Proxy(
                 proxy.group(2),
                 int(proxy.group(3))
                 if proxy.group(3) and proxy.group(3).isdigit() else 80,
-                ProxyType.stringToProxyType(proxy.group(1) or 'http'),
+                ProxyType[ptype_name.upper()] if ptype_name else ptype,
                 proxy.group(4),
                 proxy.group(5)
             )
@@ -198,33 +200,13 @@ class ProxyChecker:
 
 
 class ProxyUtiles:
-
     @staticmethod
     def parseAll(proxies: Collection[str],
                  ptype: ProxyType = ProxyType.HTTP) -> Set[Proxy]:
-        final = {
-            *ProxyUtiles.parseAllIPPort(proxies, ptype),
-            *ProxyUtiles.parseNoraml(proxies)
-        }
-        while None in final: final.remove(None)
-        return final
-
-    @staticmethod
-    def parseNoraml(proxies: Collection[str]) -> Set[Proxy]:
-        res = set(map(Proxy.fromString, proxies))
-        while None in res: res.remove(None)
+        res = set(map(partial(Proxy.fromString, ptype=ptype), proxies))
+        while None in res:
+            res.remove(None)
         return res
-
-    @staticmethod
-    def parseAllIPPort(proxies: Collection[str],
-                       ptype: ProxyType = ProxyType.HTTP) -> Set[Proxy]:
-        resu = set()
-        for pr in proxies:
-            pr = Patterns.IPPort.search(pr)
-            if not pr: continue
-            with suppress(Exception):
-                resu.add(Proxy(pr.group(1), int(pr.group(2)), ptype))
-        return resu
 
     @staticmethod
     def readFromFile(path: Any, ptype: ProxyType = ProxyType.HTTP) -> Set[Proxy]:
@@ -236,14 +218,3 @@ class ProxyUtiles:
                 lines = read.readlines()
 
         return ProxyUtiles.parseAll([prox.strip() for prox in lines], ptype)
-
-    @staticmethod
-    def readIPPortFromFile(path: Any) -> Set[Proxy]:
-        if isinstance(path, Path):
-            with path.open("r+") as read:
-                lines = read.readlines()
-        else:
-            with open(path, "r+") as read:
-                lines = read.readlines()
-
-        return ProxyUtiles.parseAllIPPort([prox.strip() for prox in lines])
