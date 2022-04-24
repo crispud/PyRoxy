@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='PyRoxy',
-      version="1.0b5",
+      version="1.1",
       packages=['PyRoxy', 'PyRoxy.Tools', 'PyRoxy.Exceptions'],
       url='https://github.com/MHProDev/PyRoxy',
       license='MIT',

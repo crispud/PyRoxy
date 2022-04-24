@@ -14,7 +14,7 @@ from yarl import URL
 from PyRoxy.Exceptions import ProxyInvalidHost, ProxyInvalidPort, ProxyParseError
 from PyRoxy.Tools import Patterns
 
-__version__ = "1.0b5"
+__version__ = "1.1"
 __auther__ = "MH_ProDev"
 __all__ = ["ProxyUtiles", "ProxyType", "ProxySocket", "ProxyChecker", "Proxy"]
 
