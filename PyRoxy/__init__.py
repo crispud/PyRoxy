@@ -56,7 +56,9 @@ class Proxy(object):
     ):
         if proxy_type == ProxyType.HTTPS:
             proxy_type = ProxyType.HTTP
-        if not Patterns.IP.match(host):
+        try:
+            host = str(ip_address(host))
+        except ValueError:
             host = gethostbyname(host)
         port = int(port)
         assert self.validate(host, port)
