@@ -1,22 +1,22 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from base64 import b64encode
 from contextlib import suppress
 from enum import IntEnum, auto
 from functools import partial
 from ipaddress import ip_address
-from multiprocessing import cpu_count
 from pathlib import Path
-from socket import socket, SOCK_STREAM, AF_INET, gethostbyname
-from typing import AnyStr, Set, Collection, Any
+from socket import AF_INET, SOCK_STREAM, gethostbyname, socket
+from typing import Any, AnyStr, Collection, Set
 
-from socks import socksocket, SOCKS4, SOCKS5, HTTP
+from socks import GeneralProxyError, HTTP, HTTPError, SOCKS4, SOCKS5, socksocket
 from yarl import URL
 
 from PyRoxy.Exceptions import ProxyInvalidHost, ProxyInvalidPort, ProxyParseError
 from PyRoxy.Tools import Patterns
 
+
 __version__ = "1.1"
 __auther__ = "MH_ProDev"
-__all__ = ["ProxyUtiles", "ProxyType", "ProxySocket", "ProxyChecker", "Proxy"]
+__all__ = ["ProxyUtiles", "ProxyType", "ProxySocket", "Proxy"]
 
 
 class ProxyType(IntEnum):
@@ -30,14 +30,6 @@ class ProxyType(IntEnum):
             SOCKS4 if self == ProxyType.SOCKS4 else \
                 HTTP
 
-    @staticmethod
-    def stringToProxyType(n: str):
-        return (ProxyType.SOCKS5 if n.lower() == "socks5" else
-                ProxyType.SOCKS4 if n.lower() == "socks4" else ProxyType.HTTP
-                ) if not (n.isdigit()) else (
-                    ProxyType.SOCKS5 if int(n) == 5 else
-                    ProxyType.SOCKS4 if int(n) == 4 else ProxyType.HTTP)
-
 
 class Proxy(object):
     user: Any
@@ -47,12 +39,12 @@ class Proxy(object):
     host: AnyStr
 
     def __init__(
-            self,
-            host: str,
-            port: int = 0,
-            proxy_type: ProxyType = ProxyType.HTTP,
-            user=None,
-            password=None
+        self,
+        host: str,
+        port: int = 0,
+        proxy_type: ProxyType = ProxyType.HTTP,
+        user=None,
+        password=None
     ):
         if proxy_type == ProxyType.HTTPS:
             proxy_type = ProxyType.HTTP
@@ -61,7 +53,7 @@ class Proxy(object):
         except ValueError:
             host = gethostbyname(host)
         port = int(port)
-        assert self.validate(host, port)
+        assert 1 <= port <= 65535
         self.host = host
         self.type = proxy_type
         self.port = port
@@ -129,8 +121,7 @@ class Proxy(object):
 
     def wrap(self, sock: Any):
         if isinstance(sock, socket):
-            return self.open_socket(sock.family, sock.type, sock.proto,
-                                    sock.fileno())
+            return self.open_socket(sock.family, sock.type, sock.proto, sock.fileno())
         sock.proxies = self.asRequest()
         return sock
 
@@ -181,25 +172,73 @@ class ProxySocket(socksocket):
             return
         self.setproxy(proxy.type.asPySocksType(), proxy.host)
 
+    def _negotiate_HTTP(self, dest_addr, dest_port):
+        proxy_type, addr, port, rdns, username, password = self.proxy
 
-class ProxyChecker:
+        # If we need to resolve locally, we do this now
+        addr = dest_addr if rdns else socket.gethostbyname(dest_addr)
 
-    @staticmethod
-    def checkAll(proxies: Collection[Proxy],
-                 url: Any = "https://httpbin.org/get",
-                 timeout=5,
-                 threads=1000):
-        with ThreadPoolExecutor(
-                max(min(round(len(proxies) * cpu_count()), threads),
-                    1)) as executor:
-            future_to_proxy = {
-                executor.submit(proxy.check, url, timeout): proxy
-                for proxy in proxies
-            }
-            return {
-                future_to_proxy[future]
-                for future in as_completed(future_to_proxy) if future.result()
-            }
+        http_headers = [
+            (b"CONNECT " + addr.encode("idna") + b":"
+             + str(dest_port).encode() + b" HTTP/1.1"),
+            b"Host: " + dest_addr.encode("idna")
+        ]
+
+        if username and password:
+            http_headers.append(b"Proxy-Authorization: basic "
+                                + b64encode(username + b":" + password))
+
+        http_headers.append(b"\r\n")
+
+        self.sendall(b"\r\n".join(http_headers))
+
+        resp = b''
+        while True:
+            data = self.recv(1024)
+            if not data:
+                break
+            resp += data
+            if len(resp) > 64 or b'\r\n\r\n' in resp:
+                break
+
+        if not resp:
+            raise GeneralProxyError("Connection closed unexpectedly")
+
+        status_line, *other = resp.decode().splitlines()
+
+        if any(other):
+            raise GeneralProxyError("Proxy server does not appear to be an HTTP proxy")
+
+        try:
+            proto, status_code, status_msg = status_line.split(" ", 2)
+        except ValueError:
+            raise GeneralProxyError("HTTP proxy server sent invalid response")
+
+        if not proto.startswith("HTTP/"):
+            raise GeneralProxyError(
+                "Proxy server does not appear to be an HTTP proxy")
+
+        try:
+            status_code = int(status_code)
+        except ValueError:
+            raise HTTPError(
+                "HTTP proxy server did not return a valid HTTP status")
+
+        if status_code != 200:
+            error = "{}: {}".format(status_code, status_msg)
+            if status_code in (400, 403, 405):
+                # It's likely that the HTTP proxy server does not support the
+                # CONNECT tunneling method
+                error += ("\n[*] Note: The HTTP proxy server may not be"
+                          " supported by PySocks (must be a CONNECT tunnel"
+                          " proxy)")
+            raise HTTPError(error)
+
+        self.proxy_sockname = (b"0.0.0.0", 0)
+        self.proxy_peername = addr, dest_port
+
+
+ProxySocket._proxy_negotiators[HTTP] = ProxySocket._negotiate_HTTP
 
 
 class ProxyUtiles:
