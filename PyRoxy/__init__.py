@@ -98,19 +98,6 @@ class Proxy(object):
             )
         return None
 
-    def ip_port(self):
-        return "%s:%d" % (self.host, self.port)
-
-    @staticmethod
-    def validate(host: str, port: int):
-        with suppress(ValueError):
-            if not ip_address(host):
-                raise ProxyInvalidHost(host)
-            if not Patterns.Port.match(str(port)):
-                raise ProxyInvalidPort(port)
-            return True
-        raise ProxyInvalidHost(host)
-
     # noinspection PyShadowingBuiltins
     def open_socket(self,
                     family=AF_INET,
@@ -118,12 +105,6 @@ class Proxy(object):
                     proto=-1,
                     fileno=None):
         return ProxySocket(self, family, type, proto, fileno)
-
-    def wrap(self, sock: Any):
-        if isinstance(sock, socket):
-            return self.open_socket(sock.family, sock.type, sock.proto, sock.fileno())
-        sock.proxies = self.asRequest()
-        return sock
 
     def asRequest(self):
         if self.password and self.user:
