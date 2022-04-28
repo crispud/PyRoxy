@@ -50,8 +50,8 @@ class Patterns:
     IP = compile("(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)")
     IPPort = compile("^((?:\d{1,3}\.){3}\d{1,3}):(\d{1,5})$")
     Proxy = compile(
-        r"^(socks4|socks5|http|https|)(?:://)?"
+        r"^(?:(socks4|socks5|http|https)://)?"
+        r"(?:(.+):(.+)@)?"
         r"((?:(?:\d+.){3}\d+|\S+[.]\w{2,3}))"
-        r"(?:[:]|)((?:\d+|))"
-        r"(?::(.+):(.+)|)$", IGNORECASE | MULTILINE)
+        r":(\d+)$", IGNORECASE | MULTILINE)
     URL = compile("\S+[.]\w{2,3}")

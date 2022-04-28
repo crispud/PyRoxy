@@ -27,8 +27,7 @@ class ProxyType(IntEnum):
 
     def asPySocksType(self):
         return SOCKS5 if self == ProxyType.SOCKS5 else \
-            SOCKS4 if self == ProxyType.SOCKS4 else \
-                HTTP
+            SOCKS4 if self == ProxyType.SOCKS4 else HTTP
 
 
 class Proxy(object):
@@ -61,9 +60,10 @@ class Proxy(object):
         self.password = password or None
 
     def __str__(self):
-        return "%s://%s:%d%s" % (self.type.name.lower(), self.host, self.port,
-                                 (":%s:%s" % (self.user, self.password)
-                                  if self.password and self.user else ""))
+        if self.password and self.user:
+            return "%s://%s:%s@%s:%d" % (self.type.name.lower(), self.user, self.password, self.host, self.port)
+        else:
+            return "%s://%s:%d" % (self.type.name.lower(), self.host, self.port)
 
     def __repr__(self):
         return "<%s Proxy %s:%d>" % (self.type.name, self.host, self.port)
@@ -80,23 +80,20 @@ class Proxy(object):
     @staticmethod
     def fromString(string: str, ptype=ProxyType.HTTP):
         with suppress(Exception):
-            if '@' in string:
-                auth, ip_port = string.split('@', 1)
-                if '://' in auth:
-                    _, auth = auth.split('://', 1)
-                string = string.replace(auth + '@', '') + ':' + auth
+            # Legacy ip:port:user:pass format
+            username, password = None, None
+            if string.replace('://', '').count(':') >= 3:
+                string, username, password = string.rsplit(':', 2)
 
-            proxy: Any = Patterns.Proxy.search(string)
+            proxy = Patterns.Proxy.search(string)
             ptype_name = proxy.group(1)
             return Proxy(
-                proxy.group(2),
-                int(proxy.group(3))
-                if proxy.group(3) and proxy.group(3).isdigit() else 80,
-                ProxyType[ptype_name.upper()] if ptype_name else ptype,
                 proxy.group(4),
-                proxy.group(5)
+                int(proxy.group(5)),
+                ProxyType[ptype_name.upper()] if ptype_name else ptype,
+                proxy.group(2) or username,
+                proxy.group(3) or password
             )
-        return None
 
     # noinspection PyShadowingBuiltins
     def open_socket(self,
@@ -107,11 +104,7 @@ class Proxy(object):
         return ProxySocket(self, family, type, proto, fileno)
 
     def asRequest(self):
-        if self.password and self.user:
-            proxy = "%s://%s:%s@%s:%d" % (self.type.name.lower(), self.user, self.password, self.host, self.port)
-        else:
-            proxy = "%s://%s:%d" % (self.type.name.lower(), self.host, self.port)
-
+        proxy = str(self)
         return {"http": proxy, "https": proxy}
 
     # noinspection PyUnreachableCode
