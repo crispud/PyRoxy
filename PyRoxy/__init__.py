@@ -1,20 +1,19 @@
-from base64 import b64encode
 from contextlib import suppress
 from enum import IntEnum, auto
 from functools import partial
 from ipaddress import ip_address
 from pathlib import Path
-from socket import AF_INET, SOCK_STREAM, gethostbyname, socket
+from socket import AF_INET, SOCK_STREAM, gethostbyname
 from typing import Any, AnyStr, Collection, Set
 
-from socks import GeneralProxyError, HTTP, HTTPError, SOCKS4, SOCKS5, socksocket
+from socks import HTTP, SOCKS4, SOCKS5, socksocket
 from yarl import URL
 
 from PyRoxy.Exceptions import ProxyInvalidHost, ProxyInvalidPort, ProxyParseError
 from PyRoxy.Tools import Patterns
 
 
-__version__ = "1.1"
+__version__ = "1.14"
 __auther__ = "MH_ProDev"
 __all__ = ["ProxyUtiles", "ProxyType", "ProxySocket", "Proxy"]
 
@@ -145,74 +144,6 @@ class ProxySocket(socksocket):
                           password=proxy.password)
             return
         self.setproxy(proxy.type.asPySocksType(), proxy.host)
-
-    def _negotiate_HTTP(self, dest_addr, dest_port):
-        proxy_type, addr, port, rdns, username, password = self.proxy
-
-        # If we need to resolve locally, we do this now
-        addr = dest_addr if rdns else socket.gethostbyname(dest_addr)
-
-        http_headers = [
-            (b"CONNECT " + addr.encode("idna") + b":"
-             + str(dest_port).encode() + b" HTTP/1.1"),
-            b"Host: " + dest_addr.encode("idna")
-        ]
-
-        if username and password:
-            http_headers.append(b"Proxy-Authorization: basic "
-                                + b64encode(username + b":" + password))
-
-        http_headers.append(b"\r\n")
-
-        self.sendall(b"\r\n".join(http_headers))
-
-        resp = b''
-        while True:
-            data = self.recv(1024)
-            if not data:
-                break
-            resp += data
-            if len(resp) > 64 or b'\r\n\r\n' in resp:
-                break
-
-        if not resp:
-            raise GeneralProxyError("Connection closed unexpectedly")
-
-        status_line, *other = resp.decode().splitlines()
-
-        if any(other):
-            raise GeneralProxyError("Proxy server does not appear to be an HTTP proxy")
-
-        try:
-            proto, status_code, status_msg = status_line.split(" ", 2)
-        except ValueError:
-            raise GeneralProxyError("HTTP proxy server sent invalid response")
-
-        if not proto.startswith("HTTP/"):
-            raise GeneralProxyError(
-                "Proxy server does not appear to be an HTTP proxy")
-
-        try:
-            status_code = int(status_code)
-        except ValueError:
-            raise HTTPError(
-                "HTTP proxy server did not return a valid HTTP status")
-
-        if status_code != 200:
-            error = "{}: {}".format(status_code, status_msg)
-            if status_code in (400, 403, 405):
-                # It's likely that the HTTP proxy server does not support the
-                # CONNECT tunneling method
-                error += ("\n[*] Note: The HTTP proxy server may not be"
-                          " supported by PySocks (must be a CONNECT tunnel"
-                          " proxy)")
-            raise HTTPError(error)
-
-        self.proxy_sockname = (b"0.0.0.0", 0)
-        self.proxy_peername = addr, dest_port
-
-
-ProxySocket._proxy_negotiators[HTTP] = ProxySocket._negotiate_HTTP
 
 
 class ProxyUtiles:
